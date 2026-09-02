@@ -1,0 +1,16 @@
+node_modules/
+.env
+npm-debug.log*
+yarn-error.log*
+
+# Persistent runtime data must stay on the VPS, not in GitHub.
+data/store.json
+data/*.tmp
+data/*.broken-*
+
+# Local automatic backups.
+backups/*.json
+backups/*.gz
+!backups/.gitkeep
+
+.DS_Store

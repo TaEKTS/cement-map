@@ -1,0 +1,18 @@
+{
+  "name": "cement-map-realtime",
+  "version": "2.3.0",
+  "private": true,
+  "description": "Realtime GTA V cement timer map for a persistent Ubuntu VPS",
+  "main": "server.js",
+  "scripts": {
+    "start": "node server.js",
+    "check": "node --check server.js"
+  },
+  "engines": {
+    "node": ">=20 <27"
+  },
+  "dependencies": {
+    "express": "4.21.2",
+    "socket.io": "4.8.1"
+  }
+}

@@ -1,0 +1,29 @@
+Cement Map v2.3.0 - เริ่มตรงนี้
+
+1) อัปไฟล์ทั้งหมดในโฟลเดอร์นี้ขึ้น GitHub
+2) บน VPS:
+
+   apt update && apt install -y git
+   mkdir -p /var/www
+   cd /var/www
+   git clone https://github.com/USERNAME/REPOSITORY.git cementmap
+   cd cementmap
+   bash scripts/vps-setup.sh
+
+3) ใส่รูป Map ที่:
+
+   public/maps/GTAV_ATLUS_8192x8192.png
+
+หลัง setup เสร็จ จะพิมพ์ Username/Password ADMIN ครั้งแรกให้บนหน้าจอ
+เปิดเว็บด้วย http://IP-VPS
+
+คำสั่งเช็ก:
+   pm2 status
+   pm2 logs cementmap
+   curl http://127.0.0.1:3000/health
+
+อัปเดตภายหลัง:
+   cd /var/www/cementmap
+   bash scripts/update-from-github.sh
+
+ข้อมูลจริงอยู่ใน data/store.json และ .gitignore ป้องกัน GitHub ทับไฟล์นี้ไว้แล้ว
