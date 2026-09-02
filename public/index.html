@@ -1,0 +1,2455 @@
+<!DOCTYPE html>
+<html lang="th">
+<head>
+  <meta charset="UTF-8">
+  <meta name="viewport" content="width=device-width, initial-scale=1, viewport-fit=cover">
+  <title>Cement Map</title>
+  <style>
+    :root {
+      --bg: #0f1317;
+      --panel: #171d23;
+      --panel-2: #1e2630;
+      --border: #2c3743;
+      --text: #f5f7fa;
+      --muted: #9aa9b7;
+      --accent: #49a8ff;
+      --green: #36d47b;
+      --orange: #ffad32;
+      --red: #ff4242;
+      --danger-bg: #5b1111;
+      --ready-bg: #0b4a2b;
+      --radius: 14px;
+    }
+
+    * { box-sizing: border-box; }
+    html, body { margin: 0; background: var(--bg); color: var(--text); font-family: Inter, system-ui, -apple-system, "Segoe UI", sans-serif; }
+    button, input, select { font: inherit; }
+    button { cursor: pointer; }
+    button:disabled { cursor: not-allowed; opacity: .45; }
+
+    .hidden { display: none !important; }
+    .app { min-height: 100vh; }
+    .topbar {
+      position: sticky; top: 0; z-index: 40;
+      display: flex; align-items: center; gap: 12px; flex-wrap: wrap;
+      padding: 12px 16px; background: rgba(15,19,23,.96);
+      border-bottom: 1px solid var(--border); backdrop-filter: blur(8px);
+    }
+    .brand { font-weight: 900; font-size: 18px; }
+    .spacer { flex: 1; }
+    .user-chip { display:flex; align-items:center; gap:8px; background:var(--panel); border:1px solid var(--border); padding:7px 10px; border-radius:999px; font-size:13px; }
+    .role { color: var(--accent); font-weight: 800; }
+
+    .page { width:100%; max-width:none; margin:0; padding:8px; }
+    .grid { display:grid; grid-template-columns: clamp(270px,16vw,320px) minmax(0,1fr) clamp(280px,17vw,330px); gap:8px; align-items:start; }
+    .map-panel { min-width:0; }
+    .timer-sidebar, .side-stack { max-height:calc(100vh - 74px); overflow:auto; scrollbar-width:thin; }
+    .timer-sidebar { position:sticky; top:62px; min-width:0; }
+    .side-stack { position:sticky; top:62px; }
+    .panel { background: var(--panel); border:1px solid var(--border); border-radius:var(--radius); }
+    .panel-pad { padding:14px; }
+    .toolbar { display:flex; gap:8px; align-items:center; flex-wrap:wrap; margin-bottom:10px; }
+    .btn {
+      border:1px solid var(--border); background:var(--panel-2); color:var(--text);
+      padding:9px 12px; border-radius:10px; min-height:42px;
+    }
+    .btn:hover { border-color:#486174; }
+    .btn-primary { background:#0d5f9e; border-color:#1f86d5; }
+    .btn-danger { background:#421519; border-color:#8a3038; color:#ffd6d9; }
+    .btn-good { background:#0c4b2e; border-color:#278356; }
+    .btn-small { min-height:34px; padding:6px 9px; font-size:13px; }
+    .zoom-label { min-width:58px; text-align:center; color:var(--muted); font-size:13px; }
+
+    .map-viewport {
+      position:relative; overflow:hidden; width:min(100%, calc(100vh - 96px)); aspect-ratio:1/1; margin:0 auto;
+      border-radius:var(--radius); background:#101519; border:1px solid var(--border);
+      touch-action:none; cursor:crosshair; user-select:none;
+    }
+    .map-stage {
+      position:absolute; inset:0; transform-origin:0 0; will-change:transform;
+      background:
+        linear-gradient(45deg, #202a23 25%, transparent 25%),
+        linear-gradient(-45deg, #202a23 25%, transparent 25%),
+        linear-gradient(45deg, transparent 75%, #202a23 75%),
+        linear-gradient(-45deg, transparent 75%, #202a23 75%);
+      background-size:32px 32px;
+      background-position:0 0,0 16px,16px -16px,-16px 0;
+    }
+    .map-image {
+      position:absolute; inset:0; width:100%; height:100%;
+      object-fit:fill; pointer-events:none;
+      image-rendering:auto;
+      backface-visibility:hidden;
+      transform:translateZ(0);
+    }
+    .map-empty {
+      position:absolute; inset:0; display:grid; place-items:center; padding:30px; text-align:center;
+      color:var(--muted); background:rgba(8,11,13,.78); pointer-events:none;
+    }
+    .map-loading {
+      position:absolute; inset:0; z-index:20; display:grid; place-items:center;
+      padding:24px; text-align:center; background:rgba(8,11,13,.88);
+      color:var(--text);
+    }
+    .map-loading-box {
+      width:min(360px,90%); border:1px solid var(--border); border-radius:14px;
+      background:var(--panel); padding:16px;
+    }
+    .map-loading-bar {
+      height:8px; overflow:hidden; border-radius:999px; background:#0d1115;
+      border:1px solid var(--border); margin-top:10px;
+    }
+    .map-loading-bar > span {
+      display:block; width:35%; height:100%; border-radius:inherit;
+      background:var(--accent); animation:mapLoadMove 1.1s ease-in-out infinite alternate;
+    }
+    @keyframes mapLoadMove { from { transform:translateX(-30%); } to { transform:translateX(185%); } }
+
+    .marker {
+      position:absolute; z-index:6;
+      /* Parent map is scaled. Reciprocal scale keeps marker UI the same screen size.
+         Put scale BEFORE translate so the parent/child scale cancels before the
+         pixel offset is applied. */
+      transform:scale(var(--inverse-map-zoom, 1)) translate(-50%,-100%);
+      transform-origin:0 0;
+      background:transparent; border:0; color:white; padding:0; text-align:center;
+    }
+    .pin {
+      width:44px; height:44px; display:grid; place-items:center; border-radius:50%;
+      border:3px solid #818b94; background:#252b31; font-size:22px;
+      box-shadow:0 3px 12px rgba(0,0,0,.55);
+      margin-left:auto;
+      margin-right:auto;
+    }
+    .marker-label {
+      margin-top:4px; display:inline-block; max-width:190px; overflow:hidden; text-overflow:ellipsis;
+      background:rgba(0,0,0,.84); border:1px solid rgba(255,255,255,.12);
+      padding:4px 8px; border-radius:7px; white-space:nowrap; font-size:11px; font-weight:900;
+    }
+    .marker.waiting .pin { border-style:dashed; opacity:.85; }
+    .marker.active .pin { border-color:#59a9ff; background:#102f49; }
+    .marker.warn3 .pin { border-color:var(--orange); background:#543606; animation:pulse3 1.4s infinite; }
+    .marker.warn3 .marker-label { background:#704400; font-size:12px; }
+    .marker.warn2 .pin { width:52px; height:52px; border-color:var(--red); background:#631010; animation:pulse2 .55s infinite; }
+    .marker.warn2 .marker-label { background:#8b1010; font-size:14px; border-color:#ff7676; }
+    .marker.ready .pin { width:50px; height:50px; border-color:var(--green); background:#0a4d2c; animation:pulseReady 1s infinite; }
+    .marker.ready .marker-label { background:#07542f; font-size:13px; }
+    /* GTA-style zoom clustering
+       - Individual points stay small and precise.
+       - Nearby points merge into a larger cluster while zoomed out.
+       - Cluster size grows slightly with member count. */
+    .marker.point-marker {
+      z-index:7;
+      display:flex;
+      flex-direction:column;
+      align-items:center;
+    }
+    .marker.point-marker.editor-draggable {
+      cursor:grab;
+      touch-action:none;
+    }
+    .marker.point-marker.editor-draggable:active,
+    .marker.point-marker.dragging {
+      cursor:grabbing;
+    }
+    .marker.point-marker.dragging {
+      z-index:30;
+      opacity:.96;
+      user-select:none;
+      -webkit-user-select:none;
+      will-change:left, top;
+    }
+    .marker.point-marker.dragging .pin {
+      box-shadow:
+        0 0 0 5px rgba(255,255,255,.13),
+        0 8px 22px rgba(0,0,0,.7);
+    }
+    .marker.point-marker.dragging .marker-label {
+      outline:2px solid rgba(116,199,255,.72);
+    }
+
+    .marker.point-marker .pin {
+      position:relative;
+      width:22px !important;
+      height:22px !important;
+      font-size:12px !important;
+      border-width:2px !important;
+      box-shadow:0 2px 7px rgba(0,0,0,.55);
+    }
+    .marker.point-marker .pin::after {
+      content:"";
+      position:absolute;
+      left:50%;
+      top:100%;
+      transform:translateX(-50%);
+      width:0;
+      height:0;
+      border-left:5px solid transparent;
+      border-right:5px solid transparent;
+      border-top:8px solid #74c7ff;
+      filter:drop-shadow(0 2px 1px rgba(0,0,0,.55));
+    }
+    .marker.point-marker.waiting .pin::after { border-top-color:#9aa9b7; }
+    .marker.point-marker.warn3 .pin::after { border-top-color:var(--orange); }
+    .marker.point-marker.warn2 .pin::after { border-top-color:var(--red); }
+    .marker.point-marker.ready .pin::after { border-top-color:var(--green); }
+
+    .marker.point-marker .marker-label {
+      align-self:center;
+      margin-top:11px;
+      padding:5px 8px !important;
+      max-width:210px;
+      opacity:.99;
+      text-shadow:0 1px 2px rgba(0,0,0,.9);
+      box-shadow:0 2px 8px rgba(0,0,0,.45);
+      line-height:1.08;
+      display:flex;
+      flex-direction:column;
+      align-items:center;
+      gap:2px;
+    }
+    .marker.point-marker .marker-name {
+      font-size:12px !important;
+      font-weight:900;
+      line-height:1.05;
+      max-width:190px;
+      overflow:hidden;
+      text-overflow:ellipsis;
+      white-space:nowrap;
+    }
+    .marker.point-marker .marker-time {
+      font-size:16px !important;
+      font-weight:1000;
+      line-height:1.0;
+      letter-spacing:.2px;
+      white-space:nowrap;
+    }
+
+    .marker.cluster-marker {
+      z-index:8;
+      cursor:pointer;
+      display:flex;
+      flex-direction:column;
+      align-items:center;
+    }
+    .marker.cluster-marker .pin {
+      position:relative;
+      width:var(--cluster-size,62px) !important;
+      height:var(--cluster-size,62px) !important;
+      font-size:calc(var(--cluster-size,62px) * .38) !important;
+      border-width:4px !important;
+      box-shadow:
+        0 0 0 5px rgba(255,255,255,.07),
+        0 7px 20px rgba(0,0,0,.6);
+    }
+    .marker.cluster-marker .pin::after {
+      content:"";
+      position:absolute;
+      left:50%;
+      top:100%;
+      transform:translateX(-50%);
+      width:0;
+      height:0;
+      border-left:8px solid transparent;
+      border-right:8px solid transparent;
+      border-top:12px solid #74c7ff;
+      filter:drop-shadow(0 2px 1px rgba(0,0,0,.6));
+    }
+    .marker.cluster-marker.waiting .pin::after { border-top-color:#9aa9b7; }
+    .marker.cluster-marker.warn3 .pin::after { border-top-color:var(--orange); }
+    .marker.cluster-marker.warn2 .pin::after { border-top-color:var(--red); }
+    .marker.cluster-marker.ready .pin::after { border-top-color:var(--green); }
+
+    .cluster-count {
+      position:absolute;
+      right:-8px;
+      top:-8px;
+      min-width:25px;
+      height:25px;
+      display:grid;
+      place-items:center;
+      padding:0 6px;
+      border-radius:999px;
+      background:#0a0d10;
+      border:2px solid #fff;
+      color:#fff;
+      font-size:10px;
+      font-weight:1000;
+      box-shadow:0 3px 8px rgba(0,0,0,.55);
+    }
+    .marker.cluster-marker .marker-label {
+      align-self:center;
+      margin-top:14px;
+      font-size:12px !important;
+      padding:5px 8px !important;
+      max-width:180px;
+    }
+    .marker.cluster-marker.ready .marker-label {
+      font-size:13px !important;
+    }
+    .marker.cluster-marker.warn2 .marker-label {
+      font-size:13px !important;
+    }
+
+    .zoom-detail-chip {
+      position:absolute;
+      z-index:13;
+      right:10px;
+      bottom:10px;
+      pointer-events:none;
+      background:rgba(0,0,0,.72);
+      border:1px solid rgba(255,255,255,.13);
+      color:#e9edf0;
+      padding:6px 9px;
+      border-radius:8px;
+      font-size:10px;
+      font-weight:800;
+    }
+
+
+    @keyframes pulse3 { 50% { transform:scale(1.12); } }
+    @keyframes pulse2 { 50% { transform:scale(1.25); filter:brightness(1.25); } }
+    @keyframes pulseReady { 50% { transform:scale(1.12); } }
+    @keyframes flash { 50% { filter:brightness(1.45); transform:scale(1.01); } }
+
+    .map-alerts {
+      position:absolute; z-index:15; top:10px; left:10px; right:10px;
+      display:flex; flex-direction:column; gap:8px; pointer-events:none;
+    }
+    .map-alert {
+      border-radius:12px; padding:11px 13px; box-shadow:0 5px 18px rgba(0,0,0,.5);
+      font-size:14px; font-weight:900; text-shadow:0 1px 1px rgba(0,0,0,.4);
+    }
+    .map-alert.warn3 { background:rgba(120,72,0,.96); border:2px solid #ffc35f; }
+    .map-alert.warn2 { background:rgba(139,13,13,.97); border:3px solid #ff6565; font-size:17px; animation:flash .65s infinite; }
+    .map-alert.ready { background:rgba(8,84,48,.97); border:2px solid #65ed9a; }
+    .map-hint {
+      position:absolute; z-index:12; bottom:10px; left:10px; right:10px; max-width:max-content;
+      background:rgba(0,0,0,.72); color:#e9edf0; font-size:11px; border-radius:8px; padding:7px 9px;
+      pointer-events:none;
+    }
+
+
+
+    .side-stack { display:flex; flex-direction:column; gap:12px; }
+    .section-title { font-size:14px; font-weight:900; margin:0 0 10px; }
+    .stats { display:grid; grid-template-columns:1fr 1fr; gap:8px; }
+    .stat { padding:10px; border:1px solid var(--border); border-radius:10px; text-align:center; background:#13191f; }
+    .stat-num { font-size:24px; font-weight:900; }
+    .stat-label { font-size:11px; color:var(--muted); }
+
+    .list-panel { margin-top:0; }
+    .timer-list { display:flex; flex-direction:column; gap:8px; }
+    .timer-sidebar .section-title { position:sticky; top:0; z-index:3; background:var(--panel); padding:2px 0 10px; }
+    .timer-lead { font-size:18px; font-weight:950; font-variant-numeric:tabular-nums; margin-top:4px; }
+    .timer-sublist { display:flex; flex-direction:column; gap:4px; margin-top:7px; }
+    .timer-subrow { display:flex; justify-content:space-between; gap:8px; padding:4px 6px; border-radius:7px; background:rgba(255,255,255,.035); font-size:11px; }
+    .timer-subrow strong { overflow:hidden; text-overflow:ellipsis; white-space:nowrap; }
+    .timer-subtime { font-variant-numeric:tabular-nums; font-weight:900; white-space:nowrap; }
+    .timer-card { cursor:pointer; }
+    .stack-list { display:flex; flex-direction:column; gap:9px; }
+    .stack-card { border:1px solid var(--border); border-radius:11px; padding:10px; background:#121920; }
+    .stack-card.warn3 { border-color:#976516; background:#2b210f; }
+    .stack-card.warn2 { border-color:#a33434; background:#321416; }
+    .stack-card.ready { border-color:#257b51; background:#0d2e20; }
+    .stack-head { display:flex; gap:8px; align-items:center; }
+    .stack-name { font-weight:950; min-width:0; overflow:hidden; text-overflow:ellipsis; white-space:nowrap; }
+    .stack-time { margin-left:auto; font-size:20px; font-weight:950; font-variant-numeric:tabular-nums; }
+    .stack-actions { display:flex; gap:6px; flex-wrap:wrap; margin-top:8px; }
+    .stack-actions .btn { min-height:32px; padding:5px 8px; font-size:12px; }
+    .stack-timer-form { display:grid; grid-template-columns:minmax(0,1fr) auto; gap:6px; margin-top:8px; }
+    .stack-timer-form input { margin:0; min-height:36px; padding:7px 8px; }
+    .stack-timer-form .btn { min-height:36px; }
+    .timer-card { border:1px solid var(--border); border-radius:11px; padding:11px; background:#13191f; }
+    .timer-card.warn3 { border-color:#976516; background:#2b210f; }
+    .timer-card.warn2 { border-color:#a33434; background:#321416; }
+    .timer-card.ready { border-color:#257b51; background:#0d2e20; }
+    .timer-card .name { font-weight:900; overflow:hidden; text-overflow:ellipsis; white-space:nowrap; }
+    .timer-card .time { font-size:22px; font-weight:900; font-variant-numeric:tabular-nums; margin-top:4px; }
+    .timer-card .meta { color:var(--muted); font-size:11px; margin-top:4px; }
+    .card-row { display:flex; gap:9px; align-items:flex-start; }
+    .card-main { min-width:0; flex:1; }
+
+    .tabbar { display:flex; gap:7px; flex-wrap:wrap; margin-bottom:10px; }
+    .tab-btn.active { background:#104b75; border-color:#2977ae; }
+
+    label { display:block; font-size:13px; font-weight:700; margin-top:10px; }
+    input, select {
+      width:100%; margin-top:5px; background:#0f151a; color:var(--text);
+      border:1px solid var(--border); border-radius:9px; padding:10px 11px; min-height:42px;
+    }
+    input:focus, select:focus, button:focus { outline:2px solid #42a5f5; outline-offset:2px; }
+    .inline-check { display:flex; align-items:center; gap:8px; margin-top:10px; }
+    .inline-check input { width:auto; margin:0; min-height:auto; }
+
+    .modal-wrap {
+      position:fixed; inset:0; z-index:100; display:grid; place-items:center;
+      padding:16px; background:rgba(0,0,0,.72);
+    }
+    .modal {
+      width:min(470px,100%); max-height:90vh; overflow:auto;
+      background:var(--panel); border:1px solid var(--border); border-radius:16px; padding:16px;
+      box-shadow:0 18px 60px rgba(0,0,0,.55);
+    }
+    .modal-head { display:flex; gap:10px; align-items:center; margin-bottom:10px; }
+    .modal-head h3 { margin:0; font-size:17px; }
+    .modal-head .spacer { flex:1; }
+    .modal-actions { display:flex; gap:8px; flex-wrap:wrap; margin-top:14px; }
+    .modal-actions .btn { flex:1; }
+
+    .status-box { border:1px solid var(--border); border-radius:11px; padding:12px; text-align:center; margin-bottom:10px; }
+    .status-box.ready { border-color:#2a995f; background:#0b3925; }
+    .status-box.warn2 { border-color:#a93b3b; background:#3c1517; }
+    .status-big { font-size:32px; font-weight:950; font-variant-numeric:tabular-nums; }
+
+    .login-screen {
+      min-height:100vh; display:grid; place-items:center; padding:18px;
+      background:radial-gradient(circle at 30% 20%, #192a36 0, transparent 45%), #0d1115;
+    }
+    .login-card { width:min(420px,100%); background:var(--panel); border:1px solid var(--border); border-radius:18px; padding:22px; }
+    .login-title { font-size:25px; font-weight:950; margin:0; }
+    .login-sub { color:var(--muted); margin:6px 0 18px; font-size:13px; }
+    .error { color:#ff9999; font-size:12px; margin-top:8px; min-height:18px; }
+    .notice { color:#b7c7d4; font-size:12px; line-height:1.5; }
+
+    .user-row { display:grid; grid-template-columns:minmax(0,1fr) 110px 74px; gap:6px; align-items:end; padding:8px 0; border-bottom:1px solid var(--border); }
+    .user-row:last-child { border-bottom:0; }
+    .history { max-height:360px; overflow:auto; }
+    .history-row { padding:8px 0; border-bottom:1px solid var(--border); font-size:12px; }
+    .history-row:last-child { border-bottom:0; }
+    .history-action { font-weight:900; }
+    .muted { color:var(--muted); }
+    .toast {
+      position:fixed; z-index:150; right:14px; bottom:14px; max-width:min(390px,calc(100vw - 28px));
+      padding:11px 13px; border-radius:11px; background:#152737; border:1px solid #31506a;
+      box-shadow:0 10px 35px rgba(0,0,0,.4);
+    }
+    .toast.error-toast { background:#40191c; border-color:#8b343b; }
+
+    @media (max-width: 1250px) {
+      .grid { grid-template-columns:240px minmax(0,1fr) 280px; }
+    }
+    @media (max-width: 1000px) {
+      .grid { grid-template-columns:1fr; }
+      .timer-sidebar, .side-stack { position:static; max-height:none; overflow:visible; }
+      .map-viewport { width:100%; aspect-ratio:1/1; }
+    }
+    @media (max-width: 620px) {
+      .page { padding:8px; }
+      .topbar { padding:10px; }
+      .marker-label { max-width:135px; }
+      .map-alert.warn2 { font-size:14px; }
+      .user-row { grid-template-columns:1fr; }
+    }
+    @media (prefers-reduced-motion: reduce) {
+      .marker .pin, .map-alert { animation:none !important; }
+    }
+  </style>
+</head>
+<body>
+
+<div id="loginScreen" class="login-screen">
+  <form id="loginForm" class="login-card">
+    <h1 class="login-title">🧱 Cement Map</h1>
+    <div class="login-sub">ระบบจุดปูนและเวลานับถอยหลัง</div>
+
+    <label>Username
+      <input id="loginUsername" autocomplete="username" required maxlength="30">
+    </label>
+    <label>Password
+      <input id="loginPassword" type="password" autocomplete="current-password" required>
+    </label>
+
+    <label class="inline-check" style="margin-top:10px">
+      <input id="rememberUsername" type="checkbox">
+      จำ Username บนเครื่องนี้
+    </label>
+
+    <div id="loginError" class="error"></div>
+    <button id="loginBtn" class="btn btn-primary" style="width:100%;margin-top:8px" type="submit">เข้าสู่ระบบ</button>
+    <p class="notice">ระบบจะจำเฉพาะ Username ถ้าเลือกไว้ และจะไม่บันทึก Password ลง Browser</p>
+    <p class="notice">บัญชีผู้ใช้สร้างโดย Admin เท่านั้น • ข้อมูลซิงก์ผ่าน Server แบบ Realtime</p>
+  </form>
+</div>
+
+<div id="app" class="app hidden">
+  <header class="topbar">
+    <div id="brand" class="brand">🧱 Cement Map</div>
+    <div class="spacer"></div>
+    <button id="soundBtn" class="btn btn-small" type="button">🔇 เปิดเสียง</button>
+    <div class="user-chip">
+      <span id="userDisplay">-</span>
+      <span id="userRole" class="role">-</span>
+    </div>
+    <button id="logoutBtn" class="btn btn-small" type="button">ออก</button>
+  </header>
+
+  <main class="page">
+    <div class="grid">
+      <aside class="panel panel-pad timer-sidebar">
+        <h2 class="section-title">🧱 รายการปูน • ได้ก่อนอยู่บน</h2>
+        <div id="timerList" class="timer-list"></div>
+      </aside>
+
+      <section class="panel panel-pad map-panel">
+        <div class="toolbar">
+          <button id="normalModeBtn" class="btn btn-primary" type="button">โหมดทั่วไป</button>
+          <button id="addWaitingBtn" class="btn editor-only" type="button">+ เพิ่มจุดปูน</button>
+          <button id="addTimerBtn" class="btn editor-only" type="button">+ จุดพร้อมเวลา</button>
+          <button id="cancelModeBtn" class="btn hidden" type="button">ยกเลิกโหมด</button>
+
+          <span class="spacer"></span>
+          <button id="zoomOutBtn" class="btn" type="button">−</button>
+          <span id="zoomLabel" class="zoom-label">100%</span>
+          <button id="zoomInBtn" class="btn" type="button">+</button>
+          <button id="resetViewBtn" class="btn btn-small" type="button">รีเซ็ตมุมมอง</button>
+        </div>
+
+        <div id="mapViewport" class="map-viewport" tabindex="0">
+          <div id="mapAlerts" class="map-alerts" aria-live="assertive"></div>
+          <div id="mapLoading" class="map-loading hidden">
+            <div class="map-loading-box">
+              <div style="font-size:26px">🗺️</div>
+              <div style="font-weight:900;margin-top:4px">กำลังโหลด Map เต็มความละเอียด</div>
+              <div id="mapLoadingText" class="notice" style="margin-top:5px">กำลังดาวน์โหลดและ Decode รูป...</div>
+              <div class="map-loading-bar"><span></span></div>
+            </div>
+          </div>
+          <div id="mapStage" class="map-stage">
+            <img id="mapImage" class="map-image hidden" alt="GTA V map">
+            <div id="mapEmpty" class="map-empty">
+              <div>
+                <div style="font-size:42px">🗺️</div>
+                <strong>ยังไม่ได้ตั้งรูปแผนที่</strong>
+                <div style="margin-top:5px;font-size:12px">ใส่ไฟล์ใน public/maps แล้วตั้งค่าเป็น /maps/ชื่อไฟล์.png</div>
+              </div>
+            </div>
+            <div id="markers"></div>
+          </div>
+          <div id="mapHint" class="map-hint">คลิกขวาลาก = เลื่อน • จับจุดปูนลากได้เหมือน Paint • กดก้อน = ซูม</div>
+          <div id="zoomDetailChip" class="zoom-detail-chip">กำลังคำนวณระดับรายละเอียด...</div>
+        </div>
+      </section>
+
+      <aside class="side-stack">
+        <section class="panel panel-pad">
+          <h2 class="section-title">สถานะ</h2>
+          <div class="stats">
+            <div class="stat"><div id="statWaiting" class="stat-num">0</div><div class="stat-label">กองรอเวลา</div></div>
+            <div class="stat"><div id="statActive" class="stat-num">0</div><div class="stat-label">กองกำลังนับ</div></div>
+            <div class="stat"><div id="statWarning" class="stat-num">0</div><div class="stat-label">≤ 3 นาที</div></div>
+            <div class="stat"><div id="statReady" class="stat-num">0</div><div class="stat-label">กองพร้อมไปปูน</div></div>
+          </div>
+          <div id="syncStatus" class="notice" style="margin-top:10px">กำลังเปิด Live Sync...</div>
+          <div id="mapQualityStatus" class="notice" style="margin-top:6px">Map: กำลังตรวจความละเอียด...</div>
+        </section>
+
+        <section class="panel panel-pad">
+          <div class="tabbar">
+            <button class="btn btn-small tab-btn active" data-tab="help" type="button">วิธีใช้</button>
+            <button class="btn btn-small tab-btn admin-only" data-tab="users" type="button">Users</button>
+            <button class="btn btn-small tab-btn admin-only" data-tab="settings" type="button">ตั้งค่า</button>
+            <button class="btn btn-small tab-btn" data-tab="history" type="button">History</button>
+          </div>
+
+          <div id="tab-help" class="tab-content">
+            <div class="notice">
+              <b>โหมดทั่วไป:</b> คลิกขวาค้างลากเพื่อเลื่อนแมพ • ลูกกลิ้งเพื่อซูม<br>
+              <b>Zoom ออก:</b> จุดใกล้กันจะรวมเป็นก้อนใหญ่ และก้อนจะแสดงเวลาน้อยสุดในกลุ่ม<br>
+              <b>Zoom เข้า:</b> ก้อนจะแตกเป็นจุดเล็กพร้อมลูกศรตามตำแหน่งจริง<br>
+              <b>กดก้อน:</b> ซูมเข้าไปหากลุ่มนั้นอัตโนมัติ<br>
+              <b>Editor/Admin:</b> จับจุดปูนตรงไหนก็ลากจากตรงนั้นได้เหมือน Paint • ไม่กระโดดเข้ากลางเมาส์<br>
+              <b>Member:</b> กรอกเวลารอบใหม่ได้<br>
+              <b>Editor:</b> ใช้โหมดเพิ่มจุดปูน / ย้าย / เปลี่ยนชื่อ / ลบจุดได้<br>
+              <b>Admin:</b> จัดการ User และตั้งค่าระบบได้<br>
+              <b>Live Sync:</b> Socket.IO Realtime • มี fallback sync อัตโนมัติ
+            </div>
+          </div>
+
+          <div id="tab-users" class="tab-content hidden">
+            <h3 class="section-title">เพิ่ม User</h3>
+            <form id="createUserForm">
+              <label>Username<input id="newUsername" maxlength="30" placeholder="staff01" required></label>
+              <label>ชื่อแสดง<input id="newDisplayName" maxlength="50" placeholder="Staff 01" required></label>
+              <label>Role
+                <select id="newRole">
+                  <option>MEMBER</option>
+                  <option>VIEWER</option>
+                  <option>EDITOR</option>
+                  <option>ADMIN</option>
+                </select>
+              </label>
+              <button class="btn btn-primary" style="width:100%;margin-top:10px" type="submit">สร้าง User</button>
+            </form>
+            <div id="usersList" style="margin-top:12px"></div>
+          </div>
+
+          <div id="tab-settings" class="tab-content hidden">
+            <form id="settingsForm">
+              <label>ชื่อเว็บ<input id="settingAppName" maxlength="60"></label>
+              <label>MAP IMAGE
+                <input id="settingMapUrl" type="text" placeholder="/maps/GTAV_ATLUS_8192x8192.png">
+              </label>
+              <div class="notice">แนะนำ: ใส่ไฟล์ Map ในโฟลเดอร์ <b>public/maps</b> แล้วใช้ path เช่น <b>/maps/GTAV_ATLUS_8192x8192.png</b> • ยังรองรับ https:// ภายนอก • ซูมสูงสุด 1500%</div>
+              <label>Live Sync (วินาที)
+                <input id="settingSync" type="number" min="1" max="60">
+              </label>
+              <div class="notice">ใช้เป็น fallback sync เมื่อ WebSocket หลุด • ปกติข้อมูลจะมาแบบ Realtime</div>
+              <label>แจ้งเตือนระดับ 1 (นาที)
+                <input id="settingAlert3" type="number" min="2" max="60">
+              </label>
+              <label>แจ้งเตือนแรง (นาที)
+                <input id="settingAlert2" type="number" min="1" max="59">
+              </label>
+              <button class="btn btn-primary" style="width:100%;margin-top:10px" type="submit">บันทึกตั้งค่า</button>
+            </form>
+          </div>
+
+          <div id="tab-history" class="tab-content hidden">
+            <button id="loadHistoryBtn" class="btn btn-small" type="button">รีเฟรช History</button>
+            <div id="historyList" class="history" style="margin-top:8px"></div>
+          </div>
+        </section>
+      </aside>
+    </div>
+  </main>
+</div>
+
+<div id="modalRoot"></div>
+<div id="toastRoot"></div>
+
+<script src="/socket.io/socket.io.js"></script>
+<script>
+(() => {
+  'use strict';
+
+  const state = {
+    token: localStorage.getItem('cementMapToken') || '',
+    user: null,
+    points: [],
+    users: [],
+    settings: {
+      appName: 'Cement Map',
+      mapImageUrl: '',
+      syncSeconds: 2,
+      alert3Minutes: 3,
+      alert2Minutes: 2,
+    },
+    revision: 0,
+    syncTimer: null,
+    tickTimer: null,
+    serverOffset: 0,
+    mode: null,       // ADD_WAITING | ADD_TIMER | MOVE_POINT
+    movePointId: null,
+    zoom: 1,
+    maxSafeZoom: 15,
+    imageNaturalWidth: 0,
+    imageNaturalHeight: 0,
+    mapImageReady: false,
+    panX: 0,
+    panY: 0,
+    drag: null,
+    moved: false,
+    markerDrag: null,
+    audioContext: null,
+    audioUnlocked: false,
+    alarmKeys: new Set(),
+    syncing: false,
+    socket: null,
+  };
+
+  const $ = (id) => document.getElementById(id);
+  const qsAll = (sel) => Array.from(document.querySelectorAll(sel));
+
+  function serverNow() {
+    return Date.now() + state.serverOffset;
+  }
+
+  function escapeHtml(value) {
+    return String(value ?? '').replace(/[&<>"']/g, ch => ({
+      '&':'&amp;', '<':'&lt;', '>':'&gt;', '"':'&quot;', "'":'&#39;'
+    }[ch]));
+  }
+
+  function roleAtLeast(role) {
+    const rank = { VIEWER:0, MEMBER:1, EDITOR:2, ADMIN:3 };
+    return (rank[state.user?.role] ?? -1) >= rank[role];
+  }
+
+  function getPointTimers(point) {
+    if (Array.isArray(point?.timers) && point.timers.length) return point.timers;
+    // Compatibility with an old server response while upgrading.
+    return [{
+      id: 'legacy',
+      name: 'กอง 1',
+      state: point?.state || 'WAITING',
+      endAt: point?.endAt || '',
+      updatedBy: point?.updatedBy || point?.createdBy || '',
+    }];
+  }
+
+  function timerStatus(timer) {
+    if (!timer || timer.state === 'WAITING' || !timer.endAt) return 'waiting';
+    const left = Number(timer.endAt) - serverNow();
+    if (left <= 0) return 'ready';
+    if (left <= state.settings.alert2Minutes * 60000) return 'warn2';
+    if (left <= state.settings.alert3Minutes * 60000) return 'warn3';
+    return 'active';
+  }
+
+  function timerUrgencyScore(timer) {
+    const status = timerStatus(timer);
+    const endAt = Number(timer?.endAt || 0);
+    if (status === 'ready') return -2_000_000_000_000 + endAt;
+    if (status === 'warn2' || status === 'warn3' || status === 'active') return endAt;
+    return Number.MAX_SAFE_INTEGER;
+  }
+
+  function orderedPointTimers(point) {
+    return [...getPointTimers(point)].sort((a,b) => {
+      const d = timerUrgencyScore(a) - timerUrgencyScore(b);
+      if (d !== 0) return d;
+      return String(a.name || '').localeCompare(String(b.name || ''), 'th');
+    });
+  }
+
+  function pointLeadTimer(point) {
+    return orderedPointTimers(point)[0] || null;
+  }
+
+  function pointStatus(point) {
+    return timerStatus(pointLeadTimer(point));
+  }
+
+  function formatTime(ms) {
+    if (!Number.isFinite(ms) || ms <= 0) return '0:00';
+    const total = Math.ceil(ms / 1000);
+    const h = Math.floor(total / 3600);
+    const m = Math.floor((total % 3600) / 60);
+    const s = total % 60;
+    return h
+      ? `${h}:${String(m).padStart(2,'0')}:${String(s).padStart(2,'0')}`
+      : `${m}:${String(s).padStart(2,'0')}`;
+  }
+
+  function showToast(message, isError = false, timeout = 3500) {
+    $('toastRoot').innerHTML = '';
+    const el = document.createElement('div');
+    el.className = 'toast' + (isError ? ' error-toast' : '');
+    el.textContent = String(message || '');
+    $('toastRoot').appendChild(el);
+    setTimeout(() => { if (el.isConnected) el.remove(); }, timeout);
+  }
+
+  function setBusy(button, busy, text = 'กำลังทำ...') {
+    if (!button) return;
+    if (busy) {
+      button.dataset.oldText = button.textContent;
+      button.disabled = true;
+      button.textContent = text;
+    } else {
+      button.disabled = false;
+      button.textContent = button.dataset.oldText || button.textContent;
+    }
+  }
+
+  async function runServer(name, ...args) {
+    let response;
+    try {
+      response = await fetch('/api/rpc', {
+        method: 'POST',
+        headers: { 'Content-Type': 'application/json' },
+        body: JSON.stringify({ name, args }),
+        cache: 'no-store',
+      });
+    } catch (_) {
+      throw new Error('เชื่อมต่อ Server ไม่สำเร็จ');
+    }
+
+    let payload;
+    try {
+      payload = await response.json();
+    } catch (_) {
+      throw new Error(`Server ตอบกลับผิดรูปแบบ (${response.status})`);
+    }
+
+    if (!response.ok || payload?.ok !== true) {
+      const msg = payload?.error || `Server error ${response.status}`;
+      if (String(msg).includes('SESSION_EXPIRED')) {
+        forceLogout('Session หมดอายุ กรุณาเข้าสู่ระบบใหม่');
+      }
+      throw new Error(String(msg));
+    }
+
+    return payload.result;
+  }
+
+  function connectRealtime() {
+    if (!state.token || typeof window.io !== 'function') return;
+    if (state.socket) {
+      try { state.socket.disconnect(); } catch (_) {}
+    }
+
+    state.socket = window.io({
+      auth: { token: state.token },
+      transports: ['websocket', 'polling'],
+      reconnection: true,
+      reconnectionDelay: 800,
+      reconnectionDelayMax: 4000,
+    });
+
+    state.socket.on('connect', () => {
+      if ($('syncStatus')) $('syncStatus').textContent = 'Realtime • Connected';
+      restartTimers();
+      void sync();
+    });
+
+    state.socket.on('disconnect', () => {
+      if ($('syncStatus')) $('syncStatus').textContent = 'Realtime หลุด • ใช้ Fallback Sync';
+      restartTimers();
+    });
+
+    state.socket.on('connect_error', err => {
+      if (String(err?.message || '').includes('SESSION_EXPIRED')) {
+        forceLogout('Session หมดอายุ กรุณาเข้าสู่ระบบใหม่');
+      }
+    });
+
+    state.socket.on('state:changed', data => {
+      if (data?.serverNow) state.serverOffset = Number(data.serverNow) - Date.now();
+      if (Number(data?.revision || 0) !== Number(state.revision || 0)) {
+        void sync();
+      }
+    });
+  }
+
+  async function init() {
+    bindEvents();
+
+    const rememberedUsername = localStorage.getItem('cementMapRememberedUsername') || '';
+    if (rememberedUsername) {
+      $('loginUsername').value = rememberedUsername;
+      $('rememberUsername').checked = true;
+    }
+
+    try {
+      const publicConfig = await runServer('getPublicConfig');
+      if (publicConfig?.appName) {
+        document.title = publicConfig.appName;
+        document.querySelector('.login-title').textContent = '🧱 ' + publicConfig.appName;
+      }
+    } catch (_) {
+      // Login remains usable even if public config fails.
+    }
+
+    if (!state.token) {
+      showLogin();
+      return;
+    }
+
+    try {
+      await loadBootstrap();
+      showApp();
+    } catch (err) {
+      localStorage.removeItem('cementMapToken');
+      state.token = '';
+      showLogin();
+      $('loginError').textContent = err.message.includes('SESSION_EXPIRED')
+        ? 'Session หมดอายุ กรุณาเข้าสู่ระบบใหม่'
+        : err.message;
+    }
+  }
+
+  function showLogin() {
+    $('loginScreen').classList.remove('hidden');
+    $('app').classList.add('hidden');
+  }
+
+  function showApp() {
+    $('loginScreen').classList.add('hidden');
+    $('app').classList.remove('hidden');
+    renderAll();
+    restartTimers();
+    connectRealtime();
+
+    if (state.user.mustChangePassword) {
+      setTimeout(() => openChangePasswordModal(true), 50);
+    }
+  }
+
+  async function loadBootstrap() {
+    const data = await runServer('bootstrap', state.token);
+    applyServerData(data);
+  }
+
+  function applyServerData(data) {
+    if (data.serverNow) state.serverOffset = Number(data.serverNow) - Date.now();
+    if (data.user) state.user = data.user;
+    if (Array.isArray(data.points)) state.points = data.points;
+    if (Array.isArray(data.users)) state.users = data.users;
+    if (data.settings) state.settings = data.settings;
+    if (data.revision != null) state.revision = Number(data.revision);
+  }
+
+  function activeSyncSeconds() {
+    const configured = Math.max(1, Number(state.settings.syncSeconds || 3));
+    if (document.hidden) return Math.max(20, configured);
+    return state.socket?.connected ? Math.max(10, configured) : configured;
+  }
+
+  function restartTimers() {
+    clearInterval(state.tickTimer);
+    clearInterval(state.syncTimer);
+
+    state.tickTimer = setInterval(() => renderDynamic(), 1000);
+    const seconds = activeSyncSeconds();
+    state.syncTimer = setInterval(sync, seconds * 1000);
+
+    if ($('syncStatus')) {
+      if (state.socket?.connected) $('syncStatus').textContent = 'Realtime • Connected';
+      else $('syncStatus').textContent = `Fallback Sync ~${seconds} วินาที`;
+    }
+  }
+
+  async function sync() {
+    if (state.syncing || !state.token) return;
+    state.syncing = true;
+    $('syncStatus').textContent = 'กำลัง Sync...';
+
+    try {
+      const data = await runServer('syncData', state.token, state.revision);
+      if (data.serverNow) state.serverOffset = Number(data.serverNow) - Date.now();
+
+      if (data.changed) {
+        applyServerData(data);
+        renderAll();
+        restartTimers();
+      }
+      $('syncStatus').textContent = state.socket?.connected ? 'Realtime • Connected' : `Fallback Sync ~${activeSyncSeconds()} วินาที`;
+    } catch (err) {
+      $('syncStatus').textContent = 'Sync ไม่สำเร็จ';
+      if (!err.message.includes('SESSION_EXPIRED')) showToast(err.message, true);
+    } finally {
+      state.syncing = false;
+    }
+  }
+
+  function renderAll() {
+    if (!state.user) return;
+
+    document.title = state.settings.appName || 'Cement Map';
+    $('brand').textContent = '🧱 ' + (state.settings.appName || 'Cement Map');
+    $('userDisplay').textContent = state.user.displayName || state.user.username;
+    $('userRole').textContent = state.user.role;
+
+    qsAll('.editor-only').forEach(el => el.classList.toggle('hidden', !roleAtLeast('EDITOR')));
+    qsAll('.admin-only').forEach(el => el.classList.toggle('hidden', state.user.role !== 'ADMIN'));
+
+    void renderMapImage();
+    renderMarkers();
+    renderTimerList();
+    renderStats();
+    renderMapAlerts();
+    renderUsers();
+    renderSettings();
+    renderModeHint();
+    applyMapTransform();
+  }
+
+  function renderDynamic() {
+    if (!state.markerDrag) {
+      renderMarkers();
+    }
+    renderTimerList();
+    renderStats();
+    renderMapAlerts();
+    checkAlarms();
+  }
+
+  function calculateSafeZoom() {
+    const viewport = $('mapViewport');
+    if (!viewport || !state.imageNaturalWidth || !state.imageNaturalHeight) {
+      state.maxSafeZoom = 15;
+      return;
+    }
+
+    const rect = viewport.getBoundingClientRect();
+    const dpr = Math.max(1, Number(window.devicePixelRatio || 1));
+
+    // This is only an estimate of the zoom level that remains close to 1:1 source pixels.
+    // v1.2.2 DOES NOT use this value as a hard cap anymore.
+    const requiredBaseWidth = Math.max(1, rect.width * dpr);
+    const requiredBaseHeight = Math.max(1, rect.height * dpr);
+
+    const ratioX = state.imageNaturalWidth / requiredBaseWidth;
+    const ratioY = state.imageNaturalHeight / requiredBaseHeight;
+    const estimatedSharpZoom = Math.max(1, Math.min(15, Math.min(ratioX, ratioY)));
+
+    // Hard maximum requested by user: 1500%.
+    state.maxSafeZoom = 15;
+
+    const mp = (state.imageNaturalWidth * state.imageNaturalHeight / 1_000_000).toFixed(1);
+    const sharpPct = Math.round(estimatedSharpZoom * 100);
+    const dprText = dpr % 1 === 0 ? dpr.toFixed(0) : dpr.toFixed(2);
+
+    $('mapQualityStatus').textContent =
+      `Map ${state.imageNaturalWidth}×${state.imageNaturalHeight}px (${mp}MP) • DPR ${dprText}x • คมประมาณ ≤ ${sharpPct}% • ซูมได้สูงสุด 1500%`;
+
+    // Intentionally do NOT reduce state.zoom when it exceeds the estimated sharp level.
+    // At very high zoom the browser will interpolate source pixels, but the user can
+    // still inspect small map areas at up to 1500%.
+  }
+
+  async function decodeCurrentMapImage() {
+    const img = $('mapImage');
+
+    if (!img.complete || !img.naturalWidth) return false;
+
+    // decode() waits until the browser has decoded the full image into a raster
+    // when supported. It avoids showing a partially-decoded large PNG.
+    if (typeof img.decode === 'function') {
+      try {
+        await img.decode();
+      } catch (_) {
+        // Some browsers reject decode() even though load completed.
+        // naturalWidth still proves the image is available.
+      }
+    }
+
+    state.imageNaturalWidth = img.naturalWidth || 0;
+    state.imageNaturalHeight = img.naturalHeight || 0;
+    state.mapImageReady = !!state.imageNaturalWidth;
+
+    calculateSafeZoom();
+
+    $('mapLoading').classList.add('hidden');
+    img.classList.toggle('hidden', !state.mapImageReady);
+
+    if (state.mapImageReady) {
+      $('mapLoadingText').textContent = 'โหลด Map เต็มความละเอียดแล้ว';
+    }
+
+    return state.mapImageReady;
+  }
+
+  async function renderMapImage() {
+    const url = String(state.settings.mapImageUrl || '').trim();
+    const img = $('mapImage');
+
+    if (!url) {
+      state.mapImageReady = false;
+      img.classList.add('hidden');
+      img.removeAttribute('src');
+      $('mapEmpty').classList.remove('hidden');
+      $('mapLoading').classList.add('hidden');
+      state.imageNaturalWidth = 0;
+      state.imageNaturalHeight = 0;
+      state.maxSafeZoom = 15;
+      $('mapQualityStatus').textContent = 'Map: ยังไม่ได้ตั้งรูป';
+      return;
+    }
+
+    $('mapEmpty').classList.add('hidden');
+
+    const resolvedUrl = new URL(url, window.location.href).href;
+    if (img.src === resolvedUrl && img.complete && img.naturalWidth) {
+      await decodeCurrentMapImage();
+      return;
+    }
+
+    state.mapImageReady = false;
+    img.classList.add('hidden');
+    $('mapLoading').classList.remove('hidden');
+    $('mapLoadingText').textContent = 'กำลังดาวน์โหลดไฟล์ภาพเต็มและ Decode...';
+    $('mapQualityStatus').textContent = 'Map: กำลังโหลดความละเอียดเต็ม...';
+
+    const loadPromise = new Promise((resolve, reject) => {
+      const onLoad = () => {
+        cleanup();
+        resolve();
+      };
+      const onError = () => {
+        cleanup();
+        reject(new Error('โหลดรูป Map ไม่สำเร็จ'));
+      };
+      const cleanup = () => {
+        img.removeEventListener('load', onLoad);
+        img.removeEventListener('error', onError);
+      };
+      img.addEventListener('load', onLoad);
+      img.addEventListener('error', onError);
+    });
+
+    // Setting src starts the full-image request.
+    img.src = resolvedUrl;
+
+    try {
+      await loadPromise;
+      await decodeCurrentMapImage();
+    } catch (err) {
+      state.mapImageReady = false;
+      state.imageNaturalWidth = 0;
+      state.imageNaturalHeight = 0;
+      img.classList.add('hidden');
+      $('mapLoading').classList.add('hidden');
+      $('mapQualityStatus').textContent = 'Map: โหลดรูปไม่สำเร็จ';
+      showToast(err.message || 'โหลดรูป Map ไม่สำเร็จ', true, 6000);
+    }
+  }
+
+  window.addEventListener('resize', () => {
+    if (state.imageNaturalWidth) {
+      calculateSafeZoom();
+    }
+  });
+
+
+  function pointUrgencyScore(point) {
+    const lead = pointLeadTimer(point);
+    return lead ? timerUrgencyScore(lead) : Number.MAX_SAFE_INTEGER;
+  }
+
+  function summarizePointGroup(points) {
+    const ordered = [...points].sort((a, b) => {
+      const diff = pointUrgencyScore(a) - pointUrgencyScore(b);
+      if (diff !== 0) return diff;
+      return String(a.name || '').localeCompare(String(b.name || ''), 'th');
+    });
+
+    const lead = ordered[0] || null;
+    if (!lead) return { status:'waiting', label:'รอกรอกเวลา', lead:null };
+
+    const timer = pointLeadTimer(lead);
+    const status = timerStatus(timer);
+    let label = 'รอกรอกเวลา';
+    if (status === 'ready') label = '0:00';
+    else if (status !== 'waiting') label = formatTime(Number(timer.endAt) - serverNow());
+
+    return { status, label, lead, timer };
+  }
+
+  function buildPointClusters() {
+    const points = state.points || [];
+    if (!points.length) return [];
+
+    const viewport = $('mapViewport');
+    const rect = viewport.getBoundingClientRect();
+
+    // Constant screen-space merge radius.
+    // Zooming out moves points closer in screen pixels => they merge.
+    // Zooming in moves them apart => the cluster naturally splits.
+    const mergeRadiusPx = 78;
+    const mergeRadiusSq = mergeRadiusPx * mergeRadiusPx;
+
+    const parent = points.map((_, i) => i);
+
+    const findRoot = i => {
+      while (parent[i] !== i) {
+        parent[i] = parent[parent[i]];
+        i = parent[i];
+      }
+      return i;
+    };
+
+    const union = (a, b) => {
+      const ra = findRoot(a);
+      const rb = findRoot(b);
+      if (ra !== rb) parent[rb] = ra;
+    };
+
+    // Number of cement points is small, so O(n²) keeps behavior deterministic.
+    for (let i = 0; i < points.length; i++) {
+      const ax = Number(points[i].x || 0) * rect.width * state.zoom;
+      const ay = Number(points[i].y || 0) * rect.height * state.zoom;
+
+      for (let j = i + 1; j < points.length; j++) {
+        const bx = Number(points[j].x || 0) * rect.width * state.zoom;
+        const by = Number(points[j].y || 0) * rect.height * state.zoom;
+        const dx = ax - bx;
+        const dy = ay - by;
+
+        if ((dx * dx + dy * dy) <= mergeRadiusSq) {
+          union(i, j);
+        }
+      }
+    }
+
+    const groups = new Map();
+    points.forEach((p, i) => {
+      const root = findRoot(i);
+      if (!groups.has(root)) groups.set(root, []);
+      groups.get(root).push(p);
+    });
+
+    return [...groups.values()].map(groupPoints => {
+      const x = groupPoints.reduce((sum, p) => sum + Number(p.x || 0), 0) / groupPoints.length;
+      const y = groupPoints.reduce((sum, p) => sum + Number(p.y || 0), 0) / groupPoints.length;
+      const summary = summarizePointGroup(groupPoints);
+
+      return {
+        points: groupPoints,
+        x,
+        y,
+        status: summary.status,
+        label: summary.label,
+        lead: summary.lead,
+      };
+    });
+  }
+
+  function zoomIntoCluster(cluster) {
+    if (!cluster || !cluster.points || cluster.points.length < 2) return;
+
+    const viewport = $('mapViewport');
+    const rect = viewport.getBoundingClientRect();
+    const hardMax = 15;
+
+    const xs = cluster.points.map(p => Number(p.x || 0));
+    const ys = cluster.points.map(p => Number(p.y || 0));
+
+    const minX = Math.min(...xs);
+    const maxX = Math.max(...xs);
+    const minY = Math.min(...ys);
+    const maxY = Math.max(...ys);
+
+    const centerX = (minX + maxX) / 2;
+    const centerY = (minY + maxY) / 2;
+
+    // Try to make the group's bounding box occupy about half the viewport.
+    // If points are nearly on top of each other, just multiply current zoom.
+    const spanX = Math.max(0.0001, maxX - minX);
+    const spanY = Math.max(0.0001, maxY - minY);
+
+    const fitX = 0.50 / spanX;
+    const fitY = 0.50 / spanY;
+    const fitZoom = Math.min(fitX, fitY);
+
+    const targetZoom = Math.min(
+      hardMax,
+      Math.max(state.zoom * 1.85, Math.min(fitZoom, state.zoom * 3.2))
+    );
+
+    state.zoom = Math.max(state.zoom, targetZoom);
+
+    // Center the cluster on the viewport after zoom.
+    const worldCenterX = centerX * rect.width;
+    const worldCenterY = centerY * rect.height;
+    state.panX = rect.width / 2 - worldCenterX * state.zoom;
+    state.panY = rect.height / 2 - worldCenterY * state.zoom;
+
+    applyMapTransform();
+    showToast(`ซูมเข้ากลุ่ม ${cluster.points.length} จุด`);
+  }
+
+  function clientToNormalizedMapPoint(clientX, clientY) {
+    const rect = $('mapViewport').getBoundingClientRect();
+    const stageX = (clientX - rect.left - state.panX) / state.zoom;
+    const stageY = (clientY - rect.top - state.panY) / state.zoom;
+
+    return {
+      x: Math.max(0, Math.min(1, stageX / Math.max(1, rect.width))),
+      y: Math.max(0, Math.min(1, stageY / Math.max(1, rect.height))),
+    };
+  }
+
+  function beginMarkerDrag(ev, point, btn) {
+    if (!roleAtLeast('EDITOR')) return;
+
+    ev.preventDefault();
+    ev.stopPropagation();
+
+    // Paint-style dragging:
+    // remember WHERE the pointer grabbed the object and move by DELTA.
+    // This prevents the marker from snapping its center under the mouse.
+    const grabMapPos = clientToNormalizedMapPoint(ev.clientX, ev.clientY);
+
+    state.markerDrag = {
+      pointerId: ev.pointerId,
+      pointId: point.id,
+      btn,
+
+      startClientX: ev.clientX,
+      startClientY: ev.clientY,
+
+      startPointerX: grabMapPos.x,
+      startPointerY: grabMapPos.y,
+
+      startX: Number(point.x || 0),
+      startY: Number(point.y || 0),
+
+      x: Number(point.x || 0),
+      y: Number(point.y || 0),
+
+      moved: false,
+      raf: null,
+      pendingClientX: ev.clientX,
+      pendingClientY: ev.clientY,
+    };
+
+    btn.setPointerCapture(ev.pointerId);
+  }
+
+  function applyPaintStyleMarkerDrag() {
+    const drag = state.markerDrag;
+    if (!drag) return;
+
+    drag.raf = null;
+
+    const currentPointer = clientToNormalizedMapPoint(
+      drag.pendingClientX,
+      drag.pendingClientY
+    );
+
+    // Move by pointer delta from the original grab point.
+    // If you grabbed the left edge of the marker, it stays grabbed by that edge.
+    const dx = currentPointer.x - drag.startPointerX;
+    const dy = currentPointer.y - drag.startPointerY;
+
+    drag.x = Math.max(0, Math.min(1, drag.startX + dx));
+    drag.y = Math.max(0, Math.min(1, drag.startY + dy));
+
+    drag.btn.style.left = `${drag.x * 100}%`;
+    drag.btn.style.top = `${drag.y * 100}%`;
+  }
+
+  function moveMarkerDrag(ev) {
+    const drag = state.markerDrag;
+    if (!drag || ev.pointerId !== drag.pointerId) return;
+
+    ev.preventDefault();
+    ev.stopPropagation();
+
+    const dxPx = ev.clientX - drag.startClientX;
+    const dyPx = ev.clientY - drag.startClientY;
+
+    // Small threshold keeps a normal click usable,
+    // but feels almost immediate like moving an object in Paint.
+    if (!drag.moved && Math.hypot(dxPx, dyPx) >= 3) {
+      drag.moved = true;
+      drag.btn.classList.add('dragging');
+      $('mapHint').textContent = 'กำลังย้ายจุดแบบ Paint • ปล่อยเมาส์เพื่อบันทึก';
+    }
+
+    if (!drag.moved) return;
+
+    drag.pendingClientX = ev.clientX;
+    drag.pendingClientY = ev.clientY;
+
+    // Limit visual updates to the browser frame rate for smoother motion.
+    if (!drag.raf) {
+      drag.raf = requestAnimationFrame(applyPaintStyleMarkerDrag);
+    }
+  }
+
+  async function finishMarkerDrag(ev, cancelled = false) {
+    const drag = state.markerDrag;
+    if (!drag || ev.pointerId !== drag.pointerId) return;
+
+    ev.preventDefault();
+    ev.stopPropagation();
+
+    // Apply the very last pointer position before saving.
+    if (drag.moved && !cancelled) {
+      drag.pendingClientX = ev.clientX;
+      drag.pendingClientY = ev.clientY;
+
+      if (drag.raf) {
+        cancelAnimationFrame(drag.raf);
+        drag.raf = null;
+      }
+
+      const currentPointer = clientToNormalizedMapPoint(
+        drag.pendingClientX,
+        drag.pendingClientY
+      );
+
+      const dx = currentPointer.x - drag.startPointerX;
+      const dy = currentPointer.y - drag.startPointerY;
+
+      drag.x = Math.max(0, Math.min(1, drag.startX + dx));
+      drag.y = Math.max(0, Math.min(1, drag.startY + dy));
+
+      drag.btn.style.left = `${drag.x * 100}%`;
+      drag.btn.style.top = `${drag.y * 100}%`;
+    }
+
+    state.markerDrag = null;
+
+    try {
+      if (drag.btn.hasPointerCapture && drag.btn.hasPointerCapture(ev.pointerId)) {
+        drag.btn.releasePointerCapture(ev.pointerId);
+      }
+    } catch (_) {}
+
+    drag.btn.classList.remove('dragging');
+    renderModeHint();
+
+    if (cancelled) {
+      if (drag.raf) cancelAnimationFrame(drag.raf);
+      drag.btn.style.left = `${drag.startX * 100}%`;
+      drag.btn.style.top = `${drag.startY * 100}%`;
+      return;
+    }
+
+    // A click with no drag keeps the old "open point" behavior.
+    if (!drag.moved) {
+      openPointModal(drag.pointId);
+      return;
+    }
+
+    try {
+      // Save only once, when the mouse is released.
+      await runServer('movePoint', state.token, drag.pointId, drag.x, drag.y);
+      await syncForce();
+      showToast('ย้ายจุดปูนแล้ว');
+    } catch (err) {
+      await syncForce();
+      showToast(err.message || 'ย้ายจุดไม่สำเร็จ', true);
+    }
+  }
+
+  function renderMarkers() {
+    const wrap = $('markers');
+    wrap.innerHTML = '';
+
+    const clusters = buildPointClusters();
+    const mergedCount = clusters.filter(c => c.points.length > 1).length;
+
+    if ($('zoomDetailChip')) {
+      $('zoomDetailChip').textContent =
+        mergedCount > 0
+          ? `Zoom ${Math.round(state.zoom * 100)}% • ${state.points.length} จุด → ${clusters.length} กลุ่ม`
+          : `Zoom ${Math.round(state.zoom * 100)}% • แยกครบ ${state.points.length} จุด`;
+    }
+
+    for (const cluster of clusters) {
+      const isCluster = cluster.points.length > 1;
+
+      if (isCluster) {
+        const btn = document.createElement('button');
+        btn.type = 'button';
+        btn.className = `marker cluster-marker ${cluster.status}`;
+        btn.style.left = `${Math.max(0, Math.min(1, cluster.x)) * 100}%`;
+        btn.style.top = `${Math.max(0, Math.min(1, cluster.y)) * 100}%`;
+
+        // Bigger group = slightly bigger cluster, capped so it does not cover the map.
+        const size = Math.min(82, 58 + Math.max(0, cluster.points.length - 2) * 4);
+        btn.style.setProperty('--cluster-size', `${size}px`);
+
+        const readyText = cluster.status === 'ready' ? ' • READY' : '';
+        const stackCount = cluster.points.reduce((n,p) => n + getPointTimers(p).length, 0);
+        btn.title = `${cluster.points.length} จุด • ${stackCount} กอง • เวลาน้อยสุด ${cluster.label}${readyText}`;
+
+        btn.innerHTML = `
+          <span class="pin">
+            🧱
+            <span class="cluster-count">×${stackCount}</span>
+          </span>
+          <span class="marker-label">${escapeHtml(cluster.label)}${cluster.status === 'ready' ? ' • พร้อม' : ''}</span>
+        `;
+
+        btn.addEventListener('pointerdown', ev => ev.stopPropagation());
+        btn.addEventListener('click', ev => {
+          ev.stopPropagation();
+          zoomIntoCluster(cluster);
+        });
+
+        wrap.appendChild(btn);
+        continue;
+      }
+
+      const p = cluster.points[0];
+      const leadTimer = pointLeadTimer(p);
+      const status = timerStatus(leadTimer);
+      const left = Number(leadTimer?.endAt || 0) - serverNow();
+
+      let label;
+      if (status === 'waiting') label = 'รอกรอกเวลา';
+      else if (status === 'ready') label = '0:00';
+      else label = formatTime(left);
+
+      const btn = document.createElement('button');
+      btn.type = 'button';
+      btn.className = `marker point-marker ${status}`;
+      btn.style.left = `${Math.max(0, Math.min(1, Number(p.x))) * 100}%`;
+      btn.style.top = `${Math.max(0, Math.min(1, Number(p.y))) * 100}%`;
+      btn.title = `${p.name} • ${label}`;
+
+      btn.innerHTML = `
+        <span class="pin">🧱</span>
+        <span class="marker-label">
+          <span class="marker-name">${escapeHtml(p.name)} • ${getPointTimers(p).length} กอง</span>
+          <span class="marker-time">${escapeHtml(leadTimer?.name || 'กอง 1')} ${escapeHtml(label)}</span>
+        </span>
+      `;
+
+      // Editor/Admin: left-hold and drag the point directly.
+      // Viewer/Member: normal click still opens the point modal.
+      if (roleAtLeast('EDITOR')) {
+        btn.classList.add('editor-draggable');
+
+        btn.addEventListener('pointerdown', ev => {
+          if (ev.button !== 0) {
+            ev.stopPropagation();
+            return;
+          }
+          beginMarkerDrag(ev, p, btn);
+        });
+
+        btn.addEventListener('pointermove', moveMarkerDrag);
+
+        btn.addEventListener('pointerup', ev => {
+          void finishMarkerDrag(ev, false);
+        });
+
+        btn.addEventListener('pointercancel', ev => {
+          void finishMarkerDrag(ev, true);
+        });
+
+        // pointerup handles both click and drag for editors.
+        btn.addEventListener('click', ev => {
+          ev.preventDefault();
+          ev.stopPropagation();
+        });
+      } else {
+        btn.addEventListener('pointerdown', ev => ev.stopPropagation());
+        btn.addEventListener('click', ev => {
+          ev.stopPropagation();
+          openPointModal(p.id);
+        });
+      }
+
+      wrap.appendChild(btn);
+    }
+  }
+
+  function renderTimerList() {
+    const sorted = [...state.points].sort((a,b) => {
+      const d = pointUrgencyScore(a) - pointUrgencyScore(b);
+      if (d !== 0) return d;
+      return String(a.name || '').localeCompare(String(b.name || ''), 'th');
+    });
+
+    if (!sorted.length) {
+      $('timerList').innerHTML = '<div class="muted">ยังไม่มีจุดปูน</div>';
+      return;
+    }
+
+    $('timerList').innerHTML = sorted.map(p => {
+      const timers = orderedPointTimers(p);
+      const lead = timers[0];
+      const status = timerStatus(lead);
+      const leadText = status === 'waiting'
+        ? 'รอกรอกเวลา'
+        : status === 'ready'
+          ? '0:00 • พร้อมไปปูน'
+          : formatTime(Number(lead.endAt) - serverNow());
+
+      const sub = timers.slice(0, 6).map(t => {
+        const st = timerStatus(t);
+        const text = st === 'waiting' ? 'รอเวลา' : st === 'ready' ? 'พร้อม' : formatTime(Number(t.endAt) - serverNow());
+        return `<div class="timer-subrow ${st}"><strong>${escapeHtml(t.name)}</strong><span class="timer-subtime">${escapeHtml(text)}</span></div>`;
+      }).join('');
+
+      const more = timers.length > 6 ? `<div class="muted" style="font-size:10px;margin-top:5px">+ อีก ${timers.length - 6} กอง</div>` : '';
+      return `
+        <div class="timer-card ${status}" data-open-point="${escapeHtml(p.id)}" role="button" tabindex="0">
+          <div class="card-row">
+            <div style="font-size:20px">🧱</div>
+            <div class="card-main">
+              <div class="name">${escapeHtml(p.name)} <span class="muted">(${timers.length} กอง)</span></div>
+              <div class="timer-lead">${escapeHtml(lead?.name || 'กอง 1')} • ${escapeHtml(leadText)}</div>
+              <div class="timer-sublist">${sub}</div>${more}
+            </div>
+          </div>
+        </div>`;
+    }).join('');
+
+    qsAll('[data-open-point]').forEach(card => {
+      card.addEventListener('click', () => openPointModal(card.dataset.openPoint));
+      card.addEventListener('keydown', ev => {
+        if (ev.key === 'Enter' || ev.key === ' ') openPointModal(card.dataset.openPoint);
+      });
+    });
+  }
+
+  function renderStats() {
+    const c = { waiting:0, active:0, warn3:0, warn2:0, ready:0 };
+    state.points.forEach(p => getPointTimers(p).forEach(t => c[timerStatus(t)]++));
+    $('statWaiting').textContent = c.waiting;
+    $('statActive').textContent = c.active;
+    $('statWarning').textContent = c.warn3 + c.warn2;
+    $('statReady').textContent = c.ready;
+  }
+
+  function renderMapAlerts() {
+    const rowsData = [];
+    state.points.forEach(p => getPointTimers(p).forEach(t => {
+      const status = timerStatus(t);
+      if (status !== 'active' && status !== 'waiting') rowsData.push({ p, t, status });
+    }));
+
+    const byStatus = status => rowsData.filter(x => x.status === status)
+      .sort((a,b) => Number(a.t.endAt || 0) - Number(b.t.endAt || 0));
+    const ready = byStatus('ready');
+    const warn2 = byStatus('warn2');
+    const warn3 = byStatus('warn3');
+    const rows = [];
+
+    if (warn2.length) rows.push(`
+      <div class="map-alert warn2">🚨 ≤ ${state.settings.alert2Minutes} นาที —
+        ${warn2.map(x => `${escapeHtml(x.p.name)} / ${escapeHtml(x.t.name)} ${formatTime(Number(x.t.endAt)-serverNow())}`).join(' • ')}
+      </div>`);
+    if (warn3.length) rows.push(`
+      <div class="map-alert warn3">⚠️ ≤ ${state.settings.alert3Minutes} นาที —
+        ${warn3.map(x => `${escapeHtml(x.p.name)} / ${escapeHtml(x.t.name)} ${formatTime(Number(x.t.endAt)-serverNow())}`).join(' • ')}
+      </div>`);
+    if (ready.length) rows.push(`
+      <div class="map-alert ready">✅ พร้อมไปปูน —
+        ${ready.map(x => `${escapeHtml(x.p.name)} / ${escapeHtml(x.t.name)}`).join(' • ')}
+      </div>`);
+
+    $('mapAlerts').innerHTML = rows.join('');
+  }
+
+  function renderUsers() {
+    if (state.user?.role !== 'ADMIN') return;
+
+    $('usersList').innerHTML = state.users.map(u => `
+      <div class="user-row" data-user-row="${escapeHtml(u.username)}">
+        <div>
+          <div style="font-weight:900">${escapeHtml(u.displayName)}</div>
+          <div class="muted" style="font-size:11px">@${escapeHtml(u.username)}</div>
+        </div>
+        <select data-user-role="${escapeHtml(u.username)}">
+          ${['VIEWER','MEMBER','EDITOR','ADMIN'].map(r => `<option ${u.role===r?'selected':''}>${r}</option>`).join('')}
+        </select>
+        <label class="inline-check" style="margin:0">
+          <input type="checkbox" data-user-enabled="${escapeHtml(u.username)}" ${u.enabled?'checked':''}> เปิด
+        </label>
+        <div style="grid-column:1/-1;display:flex;gap:6px;flex-wrap:wrap">
+          <button class="btn btn-small" data-save-user="${escapeHtml(u.username)}" type="button">บันทึกสิทธิ์</button>
+          <button class="btn btn-small" data-reset-user="${escapeHtml(u.username)}" type="button">Reset Password</button>
+        </div>
+      </div>
+    `).join('');
+
+    qsAll('[data-save-user]').forEach(btn => btn.addEventListener('click', () => saveUser(btn.dataset.saveUser)));
+    qsAll('[data-reset-user]').forEach(btn => btn.addEventListener('click', () => resetUserPassword(btn.dataset.resetUser)));
+  }
+
+  function renderSettings() {
+    if (state.user?.role !== 'ADMIN') return;
+    $('settingAppName').value = state.settings.appName || '';
+    $('settingMapUrl').value = state.settings.mapImageUrl || '';
+    $('settingSync').value = state.settings.syncSeconds || 2;
+    $('settingAlert3').value = state.settings.alert3Minutes || 3;
+    $('settingAlert2').value = state.settings.alert2Minutes || 2;
+  }
+
+  function renderModeHint() {
+    const hint = $('mapHint');
+    $('cancelModeBtn').classList.toggle('hidden', !state.mode);
+
+    if (state.mode === 'ADD_WAITING') {
+      hint.textContent = 'โหมดเพิ่มจุดปูน: คลิกซ้ายตำแหน่งบนแมพเพื่อสร้างจุดจริง';
+    } else if (state.mode === 'ADD_TIMER') {
+      hint.textContent = 'โหมดเพิ่มจุดพร้อมเวลา: คลิกซ้ายตำแหน่งบนแมพ';
+    } else if (state.mode === 'MOVE_POINT') {
+      const p = state.points.find(x => x.id === state.movePointId);
+      hint.textContent = `โหมดย้ายจุด ${p?.name || ''}: คลิกซ้ายตำแหน่งใหม่บนแมพ`;
+    } else {
+      hint.textContent = 'โหมดทั่วไป: คลิกขวาค้างลาก = เลื่อนแมพ • ลูกกลิ้ง = ซูม • เพิ่มจุดให้เลือกโหมดด้านบน';
+    }
+
+    $('normalModeBtn').classList.toggle('btn-primary', !state.mode);
+    $('addWaitingBtn').classList.toggle('btn-primary', state.mode === 'ADD_WAITING');
+    $('addTimerBtn').classList.toggle('btn-primary', state.mode === 'ADD_TIMER');
+  }
+
+  function applyMapTransform() {
+    const stage = $('mapStage');
+    stage.style.transform = `translate(${state.panX}px, ${state.panY}px) scale(${state.zoom})`;
+
+    // Used by cement markers / quick mark so only the map grows,
+    // while the UI markers stay readable at 75%–1500% zoom.
+    stage.style.setProperty('--inverse-map-zoom', String(1 / state.zoom));
+
+    $('zoomLabel').textContent = `${Math.round(state.zoom * 100)}%`;
+
+    // Rebuild screen-space clusters whenever zoom changes.
+    if (!state.markerDrag && state.points && state.points.length) {
+      renderMarkers();
+    }
+  }
+
+  function mapEventToNormalized(clientX, clientY) {
+    const rect = $('mapViewport').getBoundingClientRect();
+    const stageX = (clientX - rect.left - state.panX) / state.zoom;
+    const stageY = (clientY - rect.top - state.panY) / state.zoom;
+
+    return {
+      x: Math.max(0, Math.min(1, stageX / rect.width)),
+      y: Math.max(0, Math.min(1, stageY / rect.height)),
+    };
+  }
+
+  async function handleMapClick(clientX, clientY) {
+    const pos = mapEventToNormalized(clientX, clientY);
+
+    // General mode: left click does nothing.
+    // Select an add/move mode first when you want to modify the map.
+    if (!state.mode) {
+      return;
+    }
+
+    if (state.mode === 'MOVE_POINT') {
+      const id = state.movePointId;
+      try {
+        await runServer('movePoint', state.token, id, pos.x, pos.y);
+        clearMode();
+        await syncForce();
+        showToast('ย้ายจุดแล้ว');
+      } catch (err) {
+        showToast(err.message, true);
+      }
+      return;
+    }
+
+    openCreatePointModal(pos.x, pos.y, state.mode === 'ADD_TIMER');
+  }
+
+  function clearMode() {
+    state.mode = null;
+    state.movePointId = null;
+    renderModeHint();
+  }
+
+  function openCreatePointModal(x, y, withTimer) {
+    if (!roleAtLeast('EDITOR')) return;
+
+    showModal(`
+      <form id="createPointForm">
+        <div class="modal-head">
+          <h3>🧱 ${withTimer ? 'เพิ่มจุดพร้อมเวลา' : 'เพิ่มจุดรอกรอกเวลา'}</h3>
+          <div class="spacer"></div>
+          <button id="modalClose" class="btn btn-small" type="button">✕</button>
+        </div>
+        <label>ชื่อจุด
+          <input id="pointNameInput" maxlength="50" value="จุดปูนใหม่" required>
+        </label>
+        <label>ชื่อกองแรก
+          <input id="pointTimerNameInput" maxlength="30" value="กอง 1" required>
+        </label>
+        ${withTimer ? `
+          <label>เวลาเริ่มต้น (นาที)
+            <input id="pointMinutesInput" type="number" min="1" max="10080" value="30" required>
+          </label>` : `
+          <div class="notice" style="margin-top:10px">
+            จุดนี้จะค้างบนแมพโดยไม่มีเวลา จนกว่า Member / Editor / Admin จะมากรอกเวลา
+          </div>`}
+        <div class="modal-actions">
+          <button id="createPointSubmit" class="btn btn-primary" type="submit">บันทึก</button>
+        </div>
+      </form>
+    `);
+
+    $('modalClose').addEventListener('click', closeModal);
+    $('createPointForm').addEventListener('submit', async ev => {
+      ev.preventDefault();
+      const btn = $('createPointSubmit');
+      setBusy(btn, true);
+
+      try {
+        await runServer('createPoint', state.token, {
+          name: $('pointNameInput').value,
+          timerName: $('pointTimerNameInput').value,
+          x, y,
+          state: withTimer ? 'TIMER' : 'WAITING',
+          minutes: withTimer ? Number($('pointMinutesInput').value) : 0,
+        });
+        closeModal();
+        clearMode();
+        await syncForce();
+        showToast('เพิ่มจุดแล้ว');
+      } catch (err) {
+        showToast(err.message, true);
+      } finally {
+        setBusy(btn, false);
+      }
+    });
+  }
+
+  function timerDisplayText(timer) {
+    const status = timerStatus(timer);
+    if (status === 'waiting') return 'รอกรอกเวลา';
+    if (status === 'ready') return '0:00 • พร้อมไปปูน';
+    return formatTime(Number(timer.endAt) - serverNow());
+  }
+
+  function openPointModal(pointId) {
+    const p = state.points.find(x => x.id === pointId);
+    if (!p) return;
+
+    const canTimer = roleAtLeast('MEMBER');
+    const canEdit = roleAtLeast('EDITOR');
+    const timers = getPointTimers(p);
+
+    const stackHtml = timers.map((t, index) => {
+      const status = timerStatus(t);
+      return `
+        <div class="stack-card ${status}" data-stack-card="${escapeHtml(t.id)}">
+          <div class="stack-head">
+            <div class="stack-name">🧱 ${escapeHtml(t.name || `กอง ${index+1}`)}</div>
+            <div class="stack-time">${escapeHtml(timerDisplayText(t))}</div>
+          </div>
+          <div class="meta" style="margin-top:4px">แก้ล่าสุดโดย ${escapeHtml(t.updatedBy || p.updatedBy || p.createdBy || '-')}</div>
+          ${canTimer ? `
+            <form class="stack-timer-form" data-timer-form="${escapeHtml(t.id)}">
+              <input data-timer-minutes="${escapeHtml(t.id)}" type="number" min="1" max="10080" value="30" aria-label="นาที">
+              <button class="btn btn-good" type="submit">▶ ตั้งเวลา</button>
+            </form>` : ''}
+          ${canEdit ? `
+            <div class="stack-actions">
+              <button class="btn" data-rename-timer="${escapeHtml(t.id)}" type="button">เปลี่ยนชื่อ</button>
+              <button class="btn" data-waiting-timer="${escapeHtml(t.id)}" type="button">รอเวลา</button>
+              <button class="btn btn-danger" data-delete-timer="${escapeHtml(t.id)}" type="button" ${timers.length<=1?'disabled':''}>ลบกอง</button>
+            </div>` : ''}
+        </div>`;
+    }).join('');
+
+    showModal(`
+      <div class="modal-head">
+        <h3>🧱 ${escapeHtml(p.name)} • ${timers.length} กอง</h3>
+        <div class="spacer"></div>
+        <button id="modalClose" class="btn btn-small" type="button">✕</button>
+      </div>
+
+      <div class="stack-list">${stackHtml}</div>
+
+      ${canEdit ? `
+        <button id="addStackBtn" class="btn btn-primary" style="width:100%;margin-top:12px" type="button">+ เพิ่มกอง</button>
+        <div style="border-top:1px solid var(--border);margin-top:14px;padding-top:12px">
+          <label>ชื่อจุด
+            <input id="renameInput" maxlength="50" value="${escapeHtml(p.name)}">
+          </label>
+          <div class="modal-actions">
+            <button id="renameBtn" class="btn" type="button">บันทึกชื่อจุด</button>
+            <button id="moveBtn" class="btn" type="button">ย้ายจุด</button>
+            <button id="deleteBtn" class="btn btn-danger" type="button">ลบจุด</button>
+          </div>
+        </div>` : ''}
+    `);
+
+    $('modalClose').addEventListener('click', closeModal);
+
+    if (canTimer) {
+      qsAll('[data-timer-form]').forEach(form => form.addEventListener('submit', async ev => {
+        ev.preventDefault();
+        const timerId = form.dataset.timerForm;
+        const input = document.querySelector(`[data-timer-minutes="${CSS.escape(timerId)}"]`);
+        const btn = form.querySelector('button[type="submit"]');
+        setBusy(btn, true);
+        try {
+          await runServer('setPointTimer', state.token, p.id, timerId, Number(input.value));
+          resetAlarmKeysForPoint(p.id);
+          await syncForce();
+          openPointModal(p.id);
+          showToast('ตั้งเวลาแล้ว');
+        } catch (err) { showToast(err.message, true); }
+        finally { setBusy(btn, false); }
+      }));
+    }
+
+    if (canEdit) {
+      $('addStackBtn').addEventListener('click', () => openAddTimerModal(p.id));
+
+      qsAll('[data-rename-timer]').forEach(btn => btn.addEventListener('click', async () => {
+        const timer = getPointTimers(p).find(t => t.id === btn.dataset.renameTimer);
+        const name = prompt('ชื่อกองใหม่', timer?.name || 'กอง');
+        if (name == null) return;
+        try {
+          await runServer('renamePointTimer', state.token, p.id, btn.dataset.renameTimer, name);
+          await syncForce();
+          openPointModal(p.id);
+        } catch (err) { showToast(err.message, true); }
+      }));
+
+      qsAll('[data-waiting-timer]').forEach(btn => btn.addEventListener('click', async () => {
+        try {
+          await runServer('setPointTimerWaiting', state.token, p.id, btn.dataset.waitingTimer);
+          resetAlarmKeysForPoint(p.id);
+          await syncForce();
+          openPointModal(p.id);
+          showToast('ตั้งกองเป็นรอเวลาแล้ว');
+        } catch (err) { showToast(err.message, true); }
+      }));
+
+      qsAll('[data-delete-timer]').forEach(btn => btn.addEventListener('click', async () => {
+        if (btn.disabled) return;
+        const timer = getPointTimers(p).find(t => t.id === btn.dataset.deleteTimer);
+        if (!confirm(`ลบ "${timer?.name || 'กองนี้'}" ใช่ไหม?`)) return;
+        try {
+          await runServer('deletePointTimer', state.token, p.id, btn.dataset.deleteTimer);
+          resetAlarmKeysForPoint(p.id);
+          await syncForce();
+          openPointModal(p.id);
+          showToast('ลบกองแล้ว');
+        } catch (err) { showToast(err.message, true); }
+      }));
+
+      $('renameBtn').addEventListener('click', async () => {
+        try {
+          await runServer('renamePoint', state.token, p.id, $('renameInput').value);
+          await syncForce();
+          openPointModal(p.id);
+          showToast('เปลี่ยนชื่อจุดแล้ว');
+        } catch (err) { showToast(err.message, true); }
+      });
+
+      $('moveBtn').addEventListener('click', () => {
+        closeModal();
+        state.mode = 'MOVE_POINT';
+        state.movePointId = p.id;
+        renderModeHint();
+        showToast('คลิกตำแหน่งใหม่บนแมพ');
+      });
+
+      $('deleteBtn').addEventListener('click', async () => {
+        if (!confirm(`ลบจุด "${p.name}" พร้อมทุกกองใช่ไหม?`)) return;
+        try {
+          await runServer('deletePoint', state.token, p.id);
+          closeModal();
+          await syncForce();
+          showToast('ลบจุดแล้ว');
+        } catch (err) { showToast(err.message, true); }
+      });
+    }
+  }
+
+  function openAddTimerModal(pointId) {
+    const p = state.points.find(x => x.id === pointId);
+    if (!p || !roleAtLeast('EDITOR')) return;
+    const defaultName = `กอง ${getPointTimers(p).length + 1}`;
+
+    showModal(`
+      <form id="addStackForm">
+        <div class="modal-head">
+          <h3>+ เพิ่มกอง • ${escapeHtml(p.name)}</h3>
+          <div class="spacer"></div>
+          <button id="modalClose" class="btn btn-small" type="button">✕</button>
+        </div>
+        <label>ชื่อกอง<input id="stackNameInput" maxlength="30" value="${escapeHtml(defaultName)}" required></label>
+        <label>เวลาเริ่มต้น (นาที) <span class="muted">เว้นว่าง = รอกรอกเวลา</span>
+          <input id="stackMinutesInput" type="number" min="1" max="10080" placeholder="เช่น 30">
+        </label>
+        <button id="addStackSubmit" class="btn btn-primary" style="width:100%;margin-top:12px" type="submit">เพิ่มกอง</button>
+      </form>`);
+
+    $('modalClose').addEventListener('click', () => openPointModal(pointId));
+    $('addStackForm').addEventListener('submit', async ev => {
+      ev.preventDefault();
+      const btn = $('addStackSubmit');
+      const raw = $('stackMinutesInput').value.trim();
+      const minutes = raw ? Number(raw) : 0;
+      setBusy(btn, true);
+      try {
+        await runServer('addPointTimer', state.token, pointId, {
+          name: $('stackNameInput').value,
+          state: raw ? 'TIMER' : 'WAITING',
+          minutes,
+        });
+        await syncForce();
+        openPointModal(pointId);
+        showToast('เพิ่มกองแล้ว');
+      } catch (err) { showToast(err.message, true); }
+      finally { setBusy(btn, false); }
+    });
+  }
+
+  function showModal(html) {
+    $('modalRoot').innerHTML = `<div class="modal-wrap"><div class="modal">${html}</div></div>`;
+  }
+
+  function closeModal() {
+    $('modalRoot').innerHTML = '';
+  }
+
+  function openChangePasswordModal(required) {
+    showModal(`
+      <form id="passwordForm">
+        <div class="modal-head">
+          <h3>🔐 เปลี่ยนรหัสผ่าน</h3>
+          <div class="spacer"></div>
+          ${required ? '' : '<button id="modalClose" class="btn btn-small" type="button">✕</button>'}
+        </div>
+        ${required ? '<div class="notice">บัญชีนี้ใช้รหัสชั่วคราว ต้องเปลี่ยนก่อนใช้งาน</div>' : ''}
+        <label>รหัสผ่านเดิม<input id="oldPassword" type="password" autocomplete="current-password" required></label>
+        <label>รหัสผ่านใหม่<input id="newPassword" type="password" autocomplete="new-password" minlength="8" required></label>
+        <label>ยืนยันรหัสผ่านใหม่<input id="confirmPassword" type="password" autocomplete="new-password" minlength="8" required></label>
+        <button id="passwordSubmit" class="btn btn-primary" style="width:100%;margin-top:12px" type="submit">เปลี่ยนรหัสผ่าน</button>
+      </form>
+    `);
+
+    if (!required) $('modalClose').addEventListener('click', closeModal);
+
+    $('passwordForm').addEventListener('submit', async ev => {
+      ev.preventDefault();
+
+      const a = $('newPassword').value;
+      const b = $('confirmPassword').value;
+      if (a !== b) {
+        showToast('ยืนยันรหัสผ่านไม่ตรงกัน', true);
+        return;
+      }
+
+      const btn = $('passwordSubmit');
+      setBusy(btn, true);
+
+      try {
+        const res = await runServer('changeMyPassword', state.token, $('oldPassword').value, a);
+        state.user = res.user;
+        closeModal();
+        renderAll();
+        showToast('เปลี่ยนรหัสผ่านแล้ว');
+      } catch (err) {
+        showToast(err.message, true);
+      } finally {
+        setBusy(btn, false);
+      }
+    });
+  }
+
+  async function syncForce() {
+    const data = await runServer('syncData', state.token, -1);
+    applyServerData(data);
+    renderAll();
+    restartTimers();
+  }
+
+  async function saveUser(username) {
+    const roleEl = document.querySelector(`[data-user-role="${CSS.escape(username)}"]`);
+    const enabledEl = document.querySelector(`[data-user-enabled="${CSS.escape(username)}"]`);
+    const current = state.users.find(u => u.username === username);
+    if (!roleEl || !enabledEl || !current) return;
+
+    try {
+      await runServer('adminUpdateUser', state.token, {
+        username,
+        displayName: current.displayName,
+        role: roleEl.value,
+        enabled: enabledEl.checked,
+      });
+      await syncForce();
+      showToast('บันทึกสิทธิ์แล้ว');
+    } catch (err) {
+      showToast(err.message, true);
+      await syncForce();
+    }
+  }
+
+  async function resetUserPassword(username) {
+    if (!confirm(`Reset Password ของ @${username} ใช่ไหม?`)) return;
+    try {
+      const res = await runServer('adminResetPassword', state.token, username);
+      showTempPasswordModal(res.username, res.tempPassword);
+      await syncForce();
+    } catch (err) { showToast(err.message, true); }
+  }
+
+  function showTempPasswordModal(username, password) {
+    showModal(`
+      <div class="modal-head">
+        <h3>รหัสผ่านชั่วคราว</h3>
+        <div class="spacer"></div>
+        <button id="modalClose" class="btn btn-small" type="button">✕</button>
+      </div>
+      <div class="notice">ส่งข้อมูลนี้ให้เจ้าของบัญชี ระบบจะแสดงรหัสนี้ครั้งเดียวในหน้านี้</div>
+      <label>Username<input value="${escapeHtml(username)}" readonly></label>
+      <label>Temporary Password<input value="${escapeHtml(password)}" readonly></label>
+    `);
+    $('modalClose').addEventListener('click', closeModal);
+  }
+
+  async function loadHistory() {
+    $('historyList').innerHTML = '<div class="muted">กำลังโหลด...</div>';
+    try {
+      const rows = await runServer('getRecentHistory', state.token, 40);
+      if (!rows.length) {
+        $('historyList').innerHTML = '<div class="muted">ยังไม่มี History</div>';
+        return;
+      }
+
+      $('historyList').innerHTML = rows.map(r => `
+        <div class="history-row">
+          <div><span class="history-action">${escapeHtml(r.action)}</span> • ${escapeHtml(r.username)}</div>
+          <div class="muted">${escapeHtml(new Date(r.timestamp).toLocaleString('th-TH'))}</div>
+          <div>${escapeHtml(r.details)}</div>
+        </div>
+      `).join('');
+    } catch (err) {
+      $('historyList').innerHTML = `<div class="error">${escapeHtml(err.message)}</div>`;
+    }
+  }
+
+  function switchTab(name) {
+    qsAll('.tab-content').forEach(el => el.classList.add('hidden'));
+    qsAll('.tab-btn').forEach(el => el.classList.toggle('active', el.dataset.tab === name));
+    $(`tab-${name}`).classList.remove('hidden');
+    if (name === 'history') loadHistory();
+  }
+
+  function resetAlarmKeysForPoint(id) {
+    const prefix = `${id}:`;
+    for (const key of [...state.alarmKeys]) {
+      if (String(key).startsWith(prefix)) state.alarmKeys.delete(key);
+    }
+  }
+
+  async function unlockAudio() {
+    try {
+      state.audioContext = state.audioContext || new (window.AudioContext || window.webkitAudioContext)();
+      if (state.audioContext.state === 'suspended') await state.audioContext.resume();
+      state.audioUnlocked = true;
+      $('soundBtn').textContent = '🔊 เสียงเปิด';
+      playSound('test');
+    } catch (err) {
+      showToast('Browser ไม่อนุญาตเสียงอัตโนมัติ', true);
+    }
+  }
+
+  function playSound(kind) {
+    if (!state.audioUnlocked || !state.audioContext) return;
+
+    const sequences = {
+      warn3: [620, 760],
+      warn2: [900, 1100, 900],
+      ready: [650, 850, 1100],
+      test: [800],
+    };
+
+    const seq = sequences[kind] || sequences.test;
+
+    seq.forEach((freq, i) => {
+      setTimeout(() => {
+        try {
+          const ctx = state.audioContext;
+          const osc = ctx.createOscillator();
+          const gain = ctx.createGain();
+          osc.type = 'sine';
+          osc.frequency.value = freq;
+          gain.gain.setValueAtTime(.11, ctx.currentTime);
+          gain.gain.exponentialRampToValueAtTime(.001, ctx.currentTime + .32);
+          osc.connect(gain);
+          gain.connect(ctx.destination);
+          osc.start();
+          osc.stop(ctx.currentTime + .33);
+        } catch (_) {}
+      }, i * 180);
+    });
+  }
+
+  function checkAlarms() {
+    for (const p of state.points) {
+      for (const t of getPointTimers(p)) {
+        const status = timerStatus(t);
+        const base = `${p.id}:${t.id}`;
+
+        if (status === 'warn3') {
+          const key = `${base}:3`;
+          if (!state.alarmKeys.has(key)) {
+            state.alarmKeys.add(key);
+            playSound('warn3');
+            showToast(`⚠️ ${p.name} / ${t.name} เหลือไม่เกิน ${state.settings.alert3Minutes} นาที`, false, 5000);
+          }
+        }
+        if (status === 'warn2') {
+          const key = `${base}:2`;
+          if (!state.alarmKeys.has(key)) {
+            state.alarmKeys.add(key);
+            playSound('warn2');
+            showToast(`🚨 ${p.name} / ${t.name} เหลือไม่เกิน ${state.settings.alert2Minutes} นาที`, true, 6500);
+          }
+        }
+        if (status === 'ready') {
+          const key = `${base}:0`;
+          if (!state.alarmKeys.has(key)) {
+            state.alarmKeys.add(key);
+            playSound('ready');
+            showToast(`✅ ${p.name} / ${t.name} พร้อมไปปูน`, false, 6500);
+          }
+        }
+      }
+    }
+  }
+
+  function forceLogout(message) {
+    clearInterval(state.tickTimer);
+    if (state.socket) { try { state.socket.disconnect(); } catch (_) {} state.socket = null; }
+    clearInterval(state.syncTimer);
+    state.token = '';
+    state.user = null;
+    state.points = [];
+    localStorage.removeItem('cementMapToken');
+    showLogin();
+    if (message) $('loginError').textContent = message;
+  }
+
+  function bindEvents() {
+    $('loginForm').addEventListener('submit', async ev => {
+      ev.preventDefault();
+      const btn = $('loginBtn');
+      $('loginError').textContent = '';
+      setBusy(btn, true, 'กำลังเข้าสู่ระบบ...');
+
+      try {
+        const res = await runServer('login', $('loginUsername').value, $('loginPassword').value);
+        state.token = res.token;
+        localStorage.setItem('cementMapToken', state.token);
+
+        if ($('rememberUsername').checked) {
+          localStorage.setItem('cementMapRememberedUsername', String($('loginUsername').value || '').trim());
+        } else {
+          localStorage.removeItem('cementMapRememberedUsername');
+        }
+
+        await loadBootstrap();
+        showApp();
+      } catch (err) {
+        $('loginError').textContent = err.message;
+      } finally {
+        setBusy(btn, false);
+      }
+    });
+
+    $('logoutBtn').addEventListener('click', async () => {
+      try { await runServer('logout', state.token); } catch (_) {}
+      forceLogout('');
+    });
+
+    $('soundBtn').addEventListener('click', unlockAudio);
+
+    $('normalModeBtn').addEventListener('click', () => {
+      clearMode();
+      showToast('โหมดทั่วไป: คลิกขวาลากแมพ / ลูกกลิ้งซูม');
+    });
+
+    $('addWaitingBtn').addEventListener('click', () => {
+      state.mode = 'ADD_WAITING';
+      state.movePointId = null;
+      renderModeHint();
+    });
+
+    $('addTimerBtn').addEventListener('click', () => {
+      state.mode = 'ADD_TIMER';
+      state.movePointId = null;
+      renderModeHint();
+    });
+
+    $('cancelModeBtn').addEventListener('click', clearMode);
+
+    $('zoomInBtn').addEventListener('click', () => {
+      const hardMax = 15;
+      const next = Math.min(hardMax, state.zoom + .25);
+
+      if (next === state.zoom && hardMax < 4) {
+        showToast('ซูมสูงสุด 1500%', true, 2500);
+        return;
+      }
+
+      state.zoom = next;
+      applyMapTransform();
+    });
+
+    $('zoomOutBtn').addEventListener('click', () => {
+      state.zoom = Math.max(.75, state.zoom - .25);
+      applyMapTransform();
+    });
+
+    $('resetViewBtn').addEventListener('click', () => {
+      state.zoom = 1;
+      state.panX = 0;
+      state.panY = 0;
+      applyMapTransform();
+    });
+
+    const viewport = $('mapViewport');
+
+    // Mouse wheel zoom:
+    // - Scroll up = zoom in
+    // - Scroll down = zoom out
+    // - Zoom is anchored to the point under the mouse cursor.
+    viewport.addEventListener('wheel', ev => {
+      // Only capture the wheel while the pointer is over the map.
+      ev.preventDefault();
+
+      const rect = viewport.getBoundingClientRect();
+
+      // Cursor position inside viewport in CSS pixels.
+      const mouseX = ev.clientX - rect.left;
+      const mouseY = ev.clientY - rect.top;
+
+      // Convert cursor point into unscaled stage coordinates BEFORE zoom.
+      const worldX = (mouseX - state.panX) / state.zoom;
+      const worldY = (mouseY - state.panY) / state.zoom;
+
+      // Smooth step. Trackpads can emit small deltaY values; normalize them.
+      const direction = ev.deltaY < 0 ? 1 : -1;
+      const step = 0.15;
+      const hardMax = 15;
+      const nextZoom = Math.max(0.75, Math.min(hardMax, state.zoom + direction * step));
+
+      if (nextZoom === state.zoom) return;
+
+      // Keep the same world point under the cursor after zooming.
+      state.panX = mouseX - worldX * nextZoom;
+      state.panY = mouseY - worldY * nextZoom;
+      state.zoom = nextZoom;
+
+      applyMapTransform();
+    }, { passive: false });
+
+    // Map controls:
+    // Left click = selected tool action (normal mode does nothing)
+    // Right hold + drag = pan
+    // Mouse wheel = zoom
+    viewport.addEventListener('contextmenu', ev => ev.preventDefault());
+
+    viewport.addEventListener('pointerdown', ev => {
+      if (ev.button === 2) {
+        ev.preventDefault();
+        state.drag = {
+          pointerId: ev.pointerId,
+          rightDrag: true,
+          x: ev.clientX,
+          y: ev.clientY,
+          panX: state.panX,
+          panY: state.panY,
+        };
+        state.moved = false;
+        viewport.setPointerCapture(ev.pointerId);
+        return;
+      }
+
+      if (ev.button === 0) {
+        state.drag = {
+          pointerId: ev.pointerId,
+          leftClick: true,
+          x: ev.clientX,
+          y: ev.clientY,
+        };
+        state.moved = false;
+        viewport.setPointerCapture(ev.pointerId);
+      }
+    });
+
+    viewport.addEventListener('pointermove', ev => {
+      if (!state.drag) return;
+
+      const dx = ev.clientX - state.drag.x;
+      const dy = ev.clientY - state.drag.y;
+
+      if (state.drag.leftClick) {
+        if (Math.hypot(dx, dy) > 8) state.moved = true;
+        return;
+      }
+
+      if (state.drag.rightDrag && Math.hypot(dx, dy) > 2) {
+        state.moved = true;
+        state.panX = state.drag.panX + dx;
+        state.panY = state.drag.panY + dy;
+        applyMapTransform();
+      }
+    });
+
+    viewport.addEventListener('pointerup', ev => {
+      if (!state.drag) return;
+
+      const wasLeftClick = !!state.drag.leftClick;
+      const moved = state.moved;
+
+      state.drag = null;
+      state.moved = false;
+
+      if (wasLeftClick && !moved && ev.button === 0) {
+        handleMapClick(ev.clientX, ev.clientY);
+      }
+    });
+
+    viewport.addEventListener('pointercancel', () => {
+      state.drag = null;
+      state.moved = false;
+    });
+
+    $('createUserForm').addEventListener('submit', async ev => {
+      ev.preventDefault();
+      try {
+        const res = await runServer('adminCreateUser', state.token, {
+          username: $('newUsername').value,
+          displayName: $('newDisplayName').value,
+          role: $('newRole').value,
+        });
+        $('createUserForm').reset();
+        showTempPasswordModal(res.username, res.tempPassword);
+        await syncForce();
+      } catch (err) {
+        showToast(err.message, true);
+      }
+    });
+
+    $('settingsForm').addEventListener('submit', async ev => {
+      ev.preventDefault();
+
+      try {
+        const res = await runServer('adminSaveSettings', state.token, {
+          appName: $('settingAppName').value,
+          mapImageUrl: $('settingMapUrl').value,
+          syncSeconds: Number($('settingSync').value),
+          alert3Minutes: Number($('settingAlert3').value),
+          alert2Minutes: Number($('settingAlert2').value),
+        });
+        state.settings = res.settings;
+        state.revision = res.revision;
+        renderAll();
+        restartTimers();
+        showToast('บันทึกตั้งค่าแล้ว');
+      } catch (err) {
+        showToast(err.message, true);
+      }
+    });
+
+    $('loadHistoryBtn').addEventListener('click', loadHistory);
+
+    qsAll('.tab-btn').forEach(btn => {
+      btn.addEventListener('click', () => switchTab(btn.dataset.tab));
+    });
+
+    // Optional shortcut: double-click user chip to change own password.
+    document.querySelector('.user-chip').addEventListener('dblclick', () => openChangePasswordModal(false));
+
+    document.addEventListener('visibilitychange', () => {
+      restartTimers();
+      if (!document.hidden) {
+        sync();
+      }
+    });
+
+    window.addEventListener('focus', () => {
+      sync();
+    });
+
+    window.addEventListener('online', () => sync());
+    window.addEventListener('beforeunload', () => {
+      clearInterval(state.tickTimer);
+      clearInterval(state.syncTimer);
+      if (state.socket) { try { state.socket.disconnect(); } catch (_) {} }
+    });
+  }
+
+  init();
+})();
+</script>
+</body>
+</html>
+
+<!-- v2.3.0: multi-stack timers + left priority list + admin-only accounts + local map folder -->
